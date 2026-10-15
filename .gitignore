@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+publish/
+*.exe
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local tooling / OS
+.claude/settings.local.json
+Thumbs.db
+Desktop.ini

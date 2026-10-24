@@ -70,6 +70,13 @@ below).
 
 The time of each app's last pull is kept in `%LOCALAPPDATA%\update-craft\state.json`.
 
+## Keypad button
+
+[`keypad-plugin\`](keypad-plugin/README.md) puts update-craft on a key of the Logitech MX Creative Keypad: pressing
+it starts update-craft, and the key shows the safety check, pull and build progress until the run is done.
+`.\keypad-plugin\setup.ps1` sets it up. update-craft works the same without it; it only writes its progress to
+`%LOCALAPPDATA%\update-craft\progress.json`.
+
 ## Build and install
 
 ```powershell

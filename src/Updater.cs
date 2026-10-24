@@ -80,6 +80,7 @@ public sealed class Updater(Options opts)
         var scans = new List<ScanResult>();
         foreach (var app in apps)
         {
+            ProgressReport.Batch(scans.Count + 1, apps.Count);
             AnsiConsole.Write(new Rule($"[bold deepskyblue1]{app.Display}[/] [grey]· safety check[/]").LeftJustified());
             scans.Add(CanUpdate(app) ? await ScanAsync(app) : ScanResult.Blocked(app, "folder exists but is not a git repository"));
         }
@@ -111,6 +112,7 @@ public sealed class Updater(Options opts)
                 .AddChoices(candidates);
             // Apps with suspicious findings, or that could not be checked, start unticked: updating them is opt-in.
             foreach (var s in candidates.Where(s => s.Recommended)) prompt.Select(s);
+            ProgressReport.Phase("waiting");
             selected = AnsiConsole.Prompt(prompt).Select(s => s.App).ToList();
         }
         else
@@ -128,15 +130,18 @@ public sealed class Updater(Options opts)
 
         // ── 3. Pull everything that was approved ──
         var results = scans.ToDictionary(s => s.App, s => new BatchRow(s));
-        foreach (var app in selected)
+        foreach (var (app, i) in selected.Select((a, i) => (a, i)))
         {
+            ProgressReport.Batch(i + 1, selected.Count);
             AnsiConsole.Write(new Rule($"[bold deepskyblue1]{app.Display}[/] [grey]· pull[/]").LeftJustified());
             results[app].Pulled = PullOrClone(app);
         }
 
         // ── 4. Build back to back, no questions ──
-        foreach (var app in selected.Where(a => results[a].Pulled == true))
+        var toBuild = selected.Where(a => results[a].Pulled == true).ToList();
+        foreach (var (app, i) in toBuild.Select((a, i) => (a, i)))
         {
+            ProgressReport.Batch(i + 1, toBuild.Count);
             AnsiConsole.Write(new Rule($"[bold deepskyblue1]{app.Display}[/] [grey]· build[/]").LeftJustified());
             var sw = Stopwatch.StartNew();
             results[app].Built = Build(app);
@@ -168,6 +173,7 @@ public sealed class Updater(Options opts)
             }
             else if (opts.Interactive)
             {
+                ProgressReport.Phase("waiting");
                 var start = AnsiConsole.Prompt(new MultiSelectionPrompt<App>()
                     .Title("Start any of them now? [grey](space toggles, enter confirms — none is fine)[/]")
                     .NotRequired()
@@ -200,11 +206,12 @@ public sealed class Updater(Options opts)
     /// <summary>Clones a missing repository, otherwise fast-forward pulls. Records the pull time on success.</summary>
     private bool PullOrClone(App app)
     {
+        ProgressReport.Phase("pull", app);
         var dir = app.Dir(opts.Root);
         if (!Git.IsRepo(dir))
         {
             AnsiConsole.MarkupLine($"[bold]Cloning[/] {Markup.Escape(app.CloneUrl)} …");
-            if (!Git.Clone(app.CloneUrl, dir)) { AnsiConsole.MarkupLine("[red]git clone failed.[/]"); return false; }
+            if (!Git.Clone(app.CloneUrl, dir)) { AnsiConsole.MarkupLine("[red]git clone failed.[/]"); ProgressReport.Failed(); return false; }
             StateStore.MarkPulled(app.Id);
             return true;
         }
@@ -222,6 +229,7 @@ public sealed class Updater(Options opts)
         if (!Git.Pull(dir))
         {
             AnsiConsole.MarkupLine("[red]git pull failed.[/] Resolve it in the repository and try again.");
+            ProgressReport.Failed();
             return false;
         }
         StateStore.MarkPulled(app.Id);
@@ -263,6 +271,7 @@ public sealed class Updater(Options opts)
             return new ScanResult(app, ScanOutcome.Skipped, [], null);
         }
 
+        ProgressReport.Phase("check", app);
         var since = SinceForApp(app);
         AnsiConsole.MarkupLine($"[bold]Safety check[/] — issues & pull requests on [link={app.IssuesUrl}]{app.Slug}[/] " +
                                $"updated since [aqua]{since.ToLocalTime():yyyy-MM-dd HH:mm}[/] ({Ago(since)})");
@@ -305,7 +314,11 @@ public sealed class Updater(Options opts)
                 .StartAsync(async ctx =>
                 {
                     var task = ctx.AddTask($"Classifying {items.Count} item(s) with Jev", maxValue: items.Count);
-                    return await checker.ClassifyAsync(app, items, n => task.Value = n);
+                    return await checker.ClassifyAsync(app, items, n =>
+                    {
+                        task.Value = n;
+                        ProgressReport.Step(n, items.Count);
+                    });
                 });
         }
         catch (Exception ex)
@@ -404,14 +417,16 @@ public sealed class Updater(Options opts)
         // One cargo run for the desktop app and its CLI, so the crates they share compile once.
         AnsiConsole.MarkupLine(
             $"[bold]Building[/] {app.Display} [grey](cargo build --release -p {app.Package} -p {app.CliPackage})[/] …");
+        ProgressReport.Phase("build", app);
         var sw = Stopwatch.StartNew();
         int code;
-        try { code = Shell.Live("cargo", dir, "build", "--release", "-p", app.Package, "-p", app.CliPackage); }
-        catch (Exception ex) { AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]"); return false; }
+        try { code = Shell.Cargo(dir, ProgressReport.Step, "build", "--release", "-p", app.Package, "-p", app.CliPackage); }
+        catch (Exception ex) { AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]"); ProgressReport.Failed(); return false; }
 
         if (code != 0)
         {
             AnsiConsole.MarkupLine($"[red]✗ Build failed (exit code {code}).[/]");
+            ProgressReport.Failed();
             return false;
         }
         AnsiConsole.MarkupLine($"[green]✓ Built in {sw.Elapsed:m\\:ss}[/] → [link]{Markup.Escape(app.Exe(opts.Root))}[/]");
@@ -444,6 +459,7 @@ public sealed class Updater(Options opts)
             AnsiConsole.MarkupLine($"{Markup.Escape(question)} [grey](non-interactive: {(defaultValue ? "yes" : "no")})[/]");
             return defaultValue;
         }
+        ProgressReport.Phase("waiting");
         return AnsiConsole.Confirm(Markup.Escape(question), defaultValue);
     }
 

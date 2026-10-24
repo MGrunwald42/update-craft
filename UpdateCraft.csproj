@@ -16,6 +16,8 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <!-- The keypad plugin is its own project (built against the Logi Plugin API); keep its sources out of this one. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);keypad-plugin/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

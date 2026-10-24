@@ -10,8 +10,13 @@ try
 }
 catch (Exception ex)
 {
+    ProgressReport.Failed();
     AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
     return 1;
+}
+finally
+{
+    ProgressReport.Finish();
 }
 
 static class Cli
@@ -254,6 +259,8 @@ static class Menu
                 }
             }
 
+            // The action is over; the keypad goes back to its idle icon while the menu waits.
+            ProgressReport.Finish();
             AnsiConsole.WriteLine();
             AnsiConsole.Markup("[grey]Press any key to return to the menu…[/]");
             Console.ReadKey(intercept: true);

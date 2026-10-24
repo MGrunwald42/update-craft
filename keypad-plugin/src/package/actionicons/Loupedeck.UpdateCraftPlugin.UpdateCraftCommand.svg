@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Two arrows chasing each other: "update". -->
+  <path d="M62 30 A24 24 0 0 0 19 26"/>
+  <path d="M60 15 L62 30 L47 31"/>
+  <path d="M18 50 A24 24 0 0 0 61 54"/>
+  <path d="M20 65 L18 50 L33 49"/>
+</svg>

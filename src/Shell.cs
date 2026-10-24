@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
+using Spectre.Console;
 
 namespace UpdateCraft;
 
@@ -37,6 +40,48 @@ public static class Shell
         p.WaitForExit();
         return p.ExitCode;
     }
+
+    /// <summary>
+    /// Like <see cref="Live"/> for cargo, but also reads its progress bar ("Building [==>  ] 123/456: crate")
+    /// off stderr and reports done/total. The output still reaches this console unchanged.
+    /// </summary>
+    public static int Cargo(string workDir, Action<int, int> onProgress, params string[] args)
+    {
+        var psi = new ProcessStartInfo("cargo")
+        {
+            WorkingDirectory = workDir,
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        // A redirected stderr is not a terminal, so cargo would drop its progress bar and colours.
+        // "always" needs a width too: without one cargo stops with an error.
+        psi.Environment["CARGO_TERM_PROGRESS_WHEN"] = "always";
+        psi.Environment["CARGO_TERM_PROGRESS_WIDTH"] = AnsiConsole.Profile.Width.ToString();
+        if (AnsiConsole.Profile.Capabilities.Ansi) psi.Environment["CARGO_TERM_COLOR"] = "always";
+
+        using var p = Start(psi, "cargo");
+        var buf = new char[4096];
+        var line = new StringBuilder();
+        int n;
+        while ((n = p.StandardError.Read(buf, 0, buf.Length)) > 0)
+        {
+            Console.Error.Write(buf, 0, n);
+            foreach (var c in buf.AsSpan(0, n))
+            {
+                if (c is not ('\r' or '\n')) { line.Append(c); continue; }
+                var m = CargoProgress.Match(line.ToString());
+                if (m.Success) onProgress(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+                line.Clear();
+            }
+        }
+        p.WaitForExit();
+        return p.ExitCode;
+    }
+
+    // Colour codes surround "Building", so match on the numbers after the bar's closing bracket.
+    private static readonly Regex CargoProgress = new(@"Building\b.*?\]\s*(\d+)/(\d+)", RegexOptions.Compiled);
 
     public static bool Exists(string file)
     {

@@ -36,18 +36,20 @@ static class Cli
           --root <dir>        folder containing the app repositories (default: next to this exe)
           --since-days <n>    scan issues from the last n days instead of since the last pull
           --skip-check        pull without the safety check (not recommended)
+          --env-file <file>   .env file with GITHUB_TOKEN=<token> (raises GitHub's API rate limit)
+                              and/or TYPESAFE_API_KEY=<key>; without GITHUB_TOKEN GitHub is queried
+                              anonymously
           -h, --help          show this help
 
         ENVIRONMENT
-          TYPESAFE_API_KEY    required for the safety check
-          GITHUB_TOKEN        optional, raises GitHub's API rate limit
+          TYPESAFE_API_KEY    required for the safety check; a value in --env-file overrides it
         """;
 
     public static async Task<int> MainAsync(string[] args)
     {
         var positional = new List<string>();
         var passthrough = new List<string>();
-        string? root = null;
+        string? root = null, envFile = null;
         int? sinceDays = null;
         bool skipCheck = false, runAfter = false;
 
@@ -65,6 +67,9 @@ static class Cli
                 case "--since-days":
                     sinceDays = int.TryParse(NextValue(args, ref i, a), out var d) && d > 0
                         ? d : throw new ArgumentException("--since-days needs a positive number");
+                    break;
+                case "--env-file":
+                    envFile = NextValue(args, ref i, a);
                     break;
                 case "--skip-check":
                     skipCheck = true;
@@ -84,7 +89,9 @@ static class Cli
         }
 
         var interactive = !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
-        var opts = new Options(ResolveRoot(root), sinceDays, skipCheck, interactive);
+        var fileValues = ReadEnvFile(envFile);
+        var opts = new Options(ResolveRoot(root), sinceDays, skipCheck, interactive,
+                               ReadGitHubToken(fileValues, envFile), ResolveTypeSafeKey(fileValues));
         var updater = new Updater(opts);
 
         if (positional.Count == 0)
@@ -137,6 +144,24 @@ static class Cli
     private static App ParseApp(string id) =>
         App.Find(id) ?? throw new ArgumentException(
             $"unknown app '{id}'. Supported: {string.Join(", ", App.All.Select(a => a.Id))}");
+
+    /// <summary>Keys from the --env-file; empty when none was given.</summary>
+    private static Dictionary<string, string> ReadEnvFile(string? envFile) =>
+        envFile is null ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : Env.ReadFile(Path.GetFullPath(envFile));
+
+    /// <summary>TYPESAFE_API_KEY from the --env-file takes precedence over the environment.</summary>
+    private static string? ResolveTypeSafeKey(Dictionary<string, string> values) =>
+        values.GetValueOrDefault("TYPESAFE_API_KEY") ?? Env.Get("TYPESAFE_API_KEY");
+
+    /// <summary>GITHUB_TOKEN (or GH_TOKEN) from the --env-file; null runs GitHub queries without a token.</summary>
+    private static string? ReadGitHubToken(Dictionary<string, string> values, string? envFile)
+    {
+        if (envFile is null) return null;
+        var token = values.GetValueOrDefault("GITHUB_TOKEN") ?? values.GetValueOrDefault("GH_TOKEN");
+        if (token is null)
+            AnsiConsole.MarkupLine($"[yellow]No GITHUB_TOKEN in {Markup.Escape(envFile)} — querying GitHub without a token.[/]");
+        return token;
+    }
 
     private static string NextValue(string[] args, ref int i, string option) =>
         ++i < args.Length ? args[i] : throw new ArgumentException($"{option} needs a value");
@@ -193,12 +218,12 @@ static class Menu
             else
                 AnsiConsole.Write(new Rule("[bold deepskyblue1]update-craft[/]").LeftJustified());
             AnsiConsole.MarkupLine($"[grey]Repositories in[/] {Markup.Escape(opts.Root)}" +
-                                   (Env.Get("TYPESAFE_API_KEY") is not null
+                                   (opts.TypeSafeApiKey is not null
                                        ? "   [green]● TypeSafe safety check ready[/]"
                                        : "   [yellow]● TYPESAFE_API_KEY not set — safety check unavailable[/]") +
-                                   ((Env.Get("GITHUB_TOKEN") ?? Env.Get("GH_TOKEN")) is not null
+                                   (opts.GitHubToken is not null
                                        ? "   [green]● GitHub token[/]"
-                                       : "   [yellow]● no GITHUB_TOKEN (60 GitHub requests/hour)[/]"));
+                                       : "   [yellow]● no GitHub token (60 GitHub requests/hour)[/]"));
             AnsiConsole.WriteLine();
             updater.PrintStatus();
 

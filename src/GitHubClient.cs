@@ -31,15 +31,14 @@ public sealed class GitHubClient : IDisposable
     private readonly HttpClient _http;
     private readonly bool _hasToken;
 
-    public GitHubClient()
+    /// <param name="token">Optional (from <c>--env-file</c>): raises the anonymous limit of 60 requests/hour.</param>
+    public GitHubClient(string? token)
     {
         _http = new HttpClient { BaseAddress = new Uri("https://api.github.com/"), Timeout = TimeSpan.FromSeconds(30) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("update-craft/0.1");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         _http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        // Optional: a token raises the anonymous limit of 60 requests/hour.
-        var token = Env.Get("GITHUB_TOKEN") ?? Env.Get("GH_TOKEN");
-        _hasToken = token is not null;
+        _hasToken = !string.IsNullOrWhiteSpace(token);
         if (_hasToken)
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
@@ -99,11 +98,11 @@ public sealed class GitHubClient : IDisposable
             if (resp.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests &&
                 resp.Headers.TryGetValues("x-ratelimit-remaining", out var rem) && rem.FirstOrDefault() == "0")
                 throw new InvalidOperationException(_hasToken
-                    ? "GitHub API rate limit reached even with GITHUB_TOKEN. Wait until the limit resets (at most an hour)."
-                    : "GitHub API rate limit reached (60 requests/hour without a token). Set GITHUB_TOKEN to a personal access token.");
+                    ? "GitHub API rate limit reached even with a token. Wait until the limit resets (at most an hour)."
+                    : "GitHub API rate limit reached (60 requests/hour without a token). Pass --env-file with a file containing GITHUB_TOKEN=<personal access token>.");
             if (resp.StatusCode == HttpStatusCode.Unauthorized)
                 throw new InvalidOperationException(
-                    "GitHub rejected GITHUB_TOKEN (401) — it may have expired or been revoked. Create a new one.");
+                    "GitHub rejected the token from --env-file (401) — it may have expired or been revoked. Create a new one.");
             if (!resp.IsSuccessStatusCode)
                 throw new InvalidOperationException($"GitHub API returned {(int)resp.StatusCode} for {path}");
 

@@ -47,17 +47,26 @@ and `status` shows when each was last built.
 
 Options: `--root <dir>` (folder holding the app repositories; default: the exe's folder or the
 first parent containing one), `--since-days <n>` (scan a fixed window instead of "since the
-last pull"), `--skip-check`.
+last pull"), `--skip-check`, `--env-file <file>` (a `.env` file holding the GitHub token, see
+below).
 
 ## Requirements and setup
 
 - .NET 10 SDK (to build) / runtime (to run), Git, and the Rust toolchain (`cargo`) for the apps
 - `TYPESAFE_API_KEY`: required for the safety check
-- `GITHUB_TOKEN`: optional but recommended; a fine-grained token with *Public repositories
-  (read-only)* access raises GitHub's limit from 60 to 5,000 requests per hour
+- `TYPESAFE_API_KEY` can be set in a `.env` file passed with `--env-file`; that value takes
+  precedence. Otherwise it is read from the process environment or, as a fallback, from the saved
+  Windows user environment, so terminals opened before the variable was set still find it.
+- GitHub token: optional but recommended; a fine-grained token with *Public repositories
+  (read-only)* access raises GitHub's limit from 60 to 5,000 requests per hour. Put it in a
+  `.env` file and pass that with `--env-file`; without it GitHub is queried anonymously:
 
-Both are read from the process environment or, as a fallback, from the saved Windows user
-environment, so terminals opened before the variable was set still find it.
+  ```powershell
+  # github.env
+  GITHUB_TOKEN=github_pat_...
+
+  update-craft update all --env-file github.env
+  ```
 
 The time of each app's last pull is kept in `%LOCALAPPDATA%\update-craft\state.json`.
 

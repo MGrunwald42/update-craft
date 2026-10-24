@@ -3,11 +3,13 @@ using Spectre.Console;
 
 namespace UpdateCraft;
 
-public sealed record Options(string Root, int? SinceDays, bool SkipCheck, bool Interactive);
+public sealed record Options(string Root, int? SinceDays, bool SkipCheck, bool Interactive, string? GitHubToken, string? TypeSafeApiKey);
 
 /// <summary>The update / safety-check / build / run workflows for one app.</summary>
 public sealed class Updater(Options opts)
 {
+    // Set once TypeSafe rejects the key; shared by every app in this run so the key is not tried again.
+    private bool _typeSafeRejected;
 
     // ───────────────────────── status ─────────────────────────
 
@@ -265,7 +267,13 @@ public sealed class Updater(Options opts)
         AnsiConsole.MarkupLine($"[bold]Safety check[/] — issues & pull requests on [link={app.IssuesUrl}]{app.Slug}[/] " +
                                $"updated since [aqua]{since.ToLocalTime():yyyy-MM-dd HH:mm}[/] ({Ago(since)})");
 
-        using var checker = SafetyChecker.FromEnvironment();
+        if (_typeSafeRejected)
+        {
+            AnsiConsole.MarkupLine("[yellow]⚠ TypeSafe rejected the API key earlier in this run, so it is not tried again.[/]");
+            return new ScanResult(app, ScanOutcome.Unavailable, [], "TypeSafe rejected the API key");
+        }
+
+        using var checker = SafetyChecker.Create(opts.TypeSafeApiKey);
         if (checker is null)
         {
             AnsiConsole.MarkupLine("[yellow]⚠ TYPESAFE_API_KEY is not set, so issues cannot be classified.[/]");
@@ -275,7 +283,7 @@ public sealed class Updater(Options opts)
         List<Verdict> verdicts;
         try
         {
-            using var gh = new GitHubClient();
+            using var gh = new GitHubClient(opts.GitHubToken);
             var fetched = await AnsiConsole.Status().Spinner(Spinner.Known.Dots)
                 .StartAsync("Fetching issues and pull requests from GitHub…", _ => gh.ItemsSinceAsync(app, since));
 
@@ -304,6 +312,13 @@ public sealed class Updater(Options opts)
         {
             AnsiConsole.MarkupLine($"[red]✗ Safety check failed:[/] {Markup.Escape(ex.Message)}");
             return new ScanResult(app, ScanOutcome.Unavailable, [], ex.Message);
+        }
+
+        if (checker.KeyRejected)
+        {
+            _typeSafeRejected = true;
+            AnsiConsole.MarkupLine("[red]✗ TypeSafe rejected the API key (401). Check TYPESAFE_API_KEY; no further requests will be made with it.[/]");
+            return new ScanResult(app, ScanOutcome.Unavailable, [], "TypeSafe rejected the API key");
         }
 
         PrintVerdicts(app, verdicts);

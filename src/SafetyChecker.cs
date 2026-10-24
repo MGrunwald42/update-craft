@@ -30,6 +30,10 @@ public sealed class SafetyChecker : IDisposable
     private const int MaxComments = 10;
 
     private readonly HttpClient _http;
+    private volatile bool _keyRejected;
+
+    /// <summary>True once TypeSafe has answered 401 for this key; no further requests are made with it.</summary>
+    public bool KeyRejected => _keyRejected;
 
     private SafetyChecker(string apiKey)
     {
@@ -37,11 +41,8 @@ public sealed class SafetyChecker : IDisposable
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
     }
 
-    public static SafetyChecker? FromEnvironment()
-    {
-        var key = Env.Get("TYPESAFE_API_KEY");
-        return key is null ? null : new SafetyChecker(key);
-    }
+    public static SafetyChecker? Create(string? apiKey) =>
+        apiKey is null ? null : new SafetyChecker(apiKey);
 
     // Asked together over the same state; they run in parallel on the model side.
     private static readonly object Questions = new Dictionary<string, object>
@@ -134,6 +135,7 @@ public sealed class SafetyChecker : IDisposable
 
         for (var attempt = 0; ; attempt++)
         {
+            if (_keyRejected) return new Verdict(item, 0, 0, 0, "TypeSafe rejected the API key; not retried");
             try
             {
                 using var resp = await _http.PostAsJsonAsync(Endpoint, request, ct);
@@ -145,7 +147,10 @@ public sealed class SafetyChecker : IDisposable
                     continue;
                 }
                 if (resp.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    _keyRejected = true;
                     return new Verdict(item, 0, 0, 0, "TypeSafe rejected the API key (401)");
+                }
                 if (!resp.IsSuccessStatusCode)
                     return new Verdict(item, 0, 0, 0, $"TypeSafe returned {(int)resp.StatusCode}: {Truncate(await resp.Content.ReadAsStringAsync(ct), 200)}");
 
